@@ -33,7 +33,11 @@ class PolyBertTokenizer:
             fallback = self.tokenizer.sep_token or self.tokenizer.eos_token
             if fallback is None:
                 raise ValueError("Tokenizer must define pad or sep/eos tokens.")
-            self.tokenizer.pad_token = fallback
+            pad_id = self.tokenizer.convert_tokens_to_ids(fallback)
+            if pad_id == self.tokenizer.unk_token_id:
+                self.tokenizer.add_special_tokens({"pad_token": fallback})
+            else:
+                self.tokenizer.pad_token = fallback
 
     @property
     def pad_id(self) -> int:
@@ -54,7 +58,10 @@ class PolyBertTokenizer:
 
     @property
     def vocab_size(self) -> int:
-        return self.tokenizer.vocab_size
+        base = self.tokenizer.vocab_size
+        if hasattr(self.tokenizer, "get_added_vocab"):
+            base += len(self.tokenizer.get_added_vocab())
+        return base
 
     def encode(self, text: str):
         return self.tokenizer.encode(

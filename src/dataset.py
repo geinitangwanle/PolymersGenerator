@@ -91,6 +91,14 @@ def collate_pad(batch, pad_id):
     }
 
 
+class SmilesCollator:
+    def __init__(self, pad_id: int):
+        self.pad_id = pad_id
+
+    def __call__(self, batch):
+        return collate_pad(batch, self.pad_id)
+
+
 def make_loader(
     data_source,
     tokenizer,
@@ -115,5 +123,5 @@ def make_loader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        collate_fn=lambda b: collate_pad(b, pad_id),
+        collate_fn=SmilesCollator(pad_id),
     )
