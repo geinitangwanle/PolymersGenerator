@@ -1,1 +1,5 @@
-PSMILES_Tg_only.csv
+PSMILES_Tg_only.csv 
+data/
+    *.csv
+    *.tsv
+    *.parquet
