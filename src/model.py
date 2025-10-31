@@ -46,9 +46,8 @@ class VAESmiles(nn.Module):
                 if AutoModel is None:
                     raise ImportError("transformers is required when use_polybert=True")
                 self.polybert = AutoModel.from_pretrained(polybert_name)
-            if freeze_polybert:
-                for p in self.polybert.parameters():
-                    p.requires_grad = False # 冻结预训练模型参数
+            if freeze_polybert and self.polybert is not None:
+                self.polybert.eval()
             self.encoder = None # 不使用 RNN 编码器
             self.encoder_hidden_dim = getattr(self.polybert.config, "hidden_size", encoder_hid_dim) # polyBERT 输出维度
         else:
