@@ -1,3 +1,4 @@
+#============================导入模块================================
 import os, torch, random
 import numpy as np
 from tqdm import tqdm
@@ -5,23 +6,25 @@ from dataset import make_loader
 from model import VAESmiles
 from tokenizer import PolyBertTokenizer
 from transformers import AutoModel
-
+#====================================================================
+# 设置随机种子，以保证实验可复现
 def set_seed(seed=42):
     random.seed(seed); np.random.seed(seed)
     torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
-
+# KL 散度损失
 def kld_loss(mu, logvar):
     # 0.5 * sum( exp(logvar) + mu^2 - 1 - logvar )
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
+# 训练一个 epoch
 def train_one_epoch(model, loader, opt, kl_weight, pad_id, device):
     model.train()
     total = 0.0
     for batch in tqdm(loader, leave=False):
-        input_ids = batch["input_ids"].to(device)
-        decoder_input_ids = batch["decoder_input_ids"].to(device)
-        labels = batch["labels"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
+        input_ids = batch["input_ids"].to(device) # [B, T]
+        decoder_input_ids = batch["decoder_input_ids"].to(device) # [B, T-1]
+        labels = batch["labels"].to(device) # [B, T-1]
+        attention_mask = batch["attention_mask"].to(device) # [B, T]
 
         logits, mu, logvar = model(
             encoder_input_ids=input_ids,
@@ -34,8 +37,8 @@ def train_one_epoch(model, loader, opt, kl_weight, pad_id, device):
             labels.reshape(-1),
             ignore_index=pad_id
         )
-        loss_kld = kld_loss(mu, logvar)
-        loss = loss_rec + kl_weight * loss_kld
+        loss_kld = kld_loss(mu, logvar) # KL 散度
+        loss = loss_rec + kl_weight * loss_kld # 总损失
 
         opt.zero_grad()
         loss.backward()
