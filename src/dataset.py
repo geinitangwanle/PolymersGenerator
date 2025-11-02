@@ -1,6 +1,7 @@
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from typing import Callable, Optional
 from pathlib import Path
 
@@ -101,6 +102,9 @@ def make_loader(
     col: str = "smiles",
     max_len: int = 256,
     preprocess: Optional[Callable[[str], str]] = None,
+    pin_memory: bool = False,
+    distributed: bool = False,
+    drop_last: bool = False,
 ):
     dataset = SmilesDataset(
         data_source,
@@ -110,10 +114,17 @@ def make_loader(
         preprocess=preprocess,
     ) # 创建数据集实例
     pad_id = _get_pad_id(tokenizer) # 获取 pad_id
+    sampler = None
+    if distributed:
+        sampler = DistributedSampler(dataset, shuffle=shuffle)
+        shuffle = False  # DataLoader 不需要再打乱，由 DistributedSampler 负责
     return DataLoader( # 创建数据加载器
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
         collate_fn=SmilesCollator(pad_id),
+        sampler=sampler,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
     )

@@ -6,6 +6,7 @@ from dataset import make_loader
 from model import VAESmiles
 from tokenizer import PolyBertTokenizer
 from transformers import AutoModel
+from contextlib import nullcontext
 #====================================================================
 # 设置随机种子，以保证实验可复现
 def set_seed(seed=42):
@@ -17,33 +18,46 @@ def kld_loss(mu, logvar):
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
 # 训练一个 epoch
-def train_one_epoch(model, loader, opt, kl_weight, pad_id, device):
+def train_one_epoch(model, loader, opt, kl_weight, pad_id, device, *, scaler=None, scheduler=None):
     model.train()
     total = 0.0
+    device_type = device.type if isinstance(device, torch.device) else device
+    use_amp = scaler is not None and device_type.startswith("cuda")
     for batch in tqdm(loader, leave=False):
         input_ids = batch["input_ids"].to(device) # [B, T]
         decoder_input_ids = batch["decoder_input_ids"].to(device) # [B, T-1]
         labels = batch["labels"].to(device) # [B, T-1]
         attention_mask = batch["attention_mask"].to(device) # [B, T]
 
-        logits, mu, logvar = model(
-            encoder_input_ids=input_ids,
-            decoder_input_ids=decoder_input_ids,
-            encoder_attention_mask=attention_mask,
-        )
-        # 交叉熵（忽略 pad）
-        loss_rec = torch.nn.functional.cross_entropy(
-            logits.reshape(-1, logits.size(-1)),
-            labels.reshape(-1),
-            ignore_index=pad_id
-        )
-        loss_kld = kld_loss(mu, logvar) # KL 散度
-        loss = loss_rec + kl_weight * loss_kld # 总损失
+        ctx = torch.autocast(device_type=device_type, dtype=torch.float16) if use_amp else nullcontext()
+        with ctx:
+            logits, mu, logvar = model(
+                encoder_input_ids=input_ids,
+                decoder_input_ids=decoder_input_ids,
+                encoder_attention_mask=attention_mask,
+            )
+            # 交叉熵（忽略 pad）
+            loss_rec = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                labels.reshape(-1),
+                ignore_index=pad_id
+            )
+            loss_kld = kld_loss(mu, logvar) # KL 散度
+            loss = loss_rec + kl_weight * loss_kld # 总损失
 
-        opt.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
+        opt.zero_grad(set_to_none=True)
+        if scaler is not None and use_amp:
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(opt)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+        if scheduler is not None:
+            scheduler.step()
         total += loss.item() * input_ids.size(0)
     return total / len(loader.dataset)
 
