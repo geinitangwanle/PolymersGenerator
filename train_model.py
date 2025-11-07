@@ -1,11 +1,8 @@
-import os
 import sys
 import torch
-import random
-import numpy as np
+import pandas as pd
 from pathlib import Path
 from transformers import AutoModel, get_cosine_schedule_with_warmup
-from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -18,7 +15,7 @@ sys.path.append(str(repo / "src"))
 from src.tokenizer import PolyBertTokenizer
 from src.dataset import make_loader
 from src.modelv2 import VAESmiles
-from src.train import train_one_epoch, val_loss, set_seed
+from src.train import train_one_epoch, val_loss, set_seed, split_dataframe
 
 # ==============================
 # 核心函数：支持单机多卡DDP训练
@@ -34,12 +31,18 @@ def main(rank, world_size):
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
     print(f"[Rank {rank}] Using device: {device}")
 
-    csv_path = "data/PSMILES_Tg_only.csv"
+    csv_path = repo / "data/PSMILES_Tg_only.csv"
+    if not csv_path.exists():
+        csv_path = Path("data/PSMILES_Tg_only.csv")
     tokenizer = PolyBertTokenizer("./polybert")
+
+    # === 数据划分（确保各 rank 使用相同拆分） ===
+    df = pd.read_csv(csv_path)
+    train_df, val_df, test_df = split_dataframe(df, train_frac=0.8, val_frac=0.1, seed=42)
 
     # === DataLoader优化 ===
     train_loader = make_loader(
-        csv_path, tokenizer,
+        train_df, tokenizer,
         batch_size=128,
         shuffle=True,
         col="PSMILES",
@@ -49,7 +52,17 @@ def main(rank, world_size):
         distributed=(world_size > 1),
     )
     val_loader = make_loader(
-        csv_path, tokenizer,
+        val_df, tokenizer,
+        batch_size=128,
+        shuffle=False,
+        col="PSMILES",
+        max_len=256,
+        num_workers=8,
+        pin_memory=True,
+        distributed=(world_size > 1),
+    )
+    test_loader = make_loader(
+        test_df, tokenizer,
         batch_size=128,
         shuffle=False,
         col="PSMILES",
@@ -122,6 +135,11 @@ def main(rank, world_size):
                     },
                     ckpt_dir / "modelv2_best.pt",
                 )
+
+    # === 测试集评估（kl_weight=1.0 更常用） ===
+    test_loss_val = val_loss(model, test_loader, kl_weight=1.0, pad_id=tokenizer.pad_id, device=device)
+    if rank == 0:
+        print(f"[Test] loss={test_loss_val:.4f}")
 
     if world_size > 1:
         dist.destroy_process_group()

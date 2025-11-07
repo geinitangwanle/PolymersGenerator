@@ -1,6 +1,9 @@
 #============================导入模块================================
 import os, torch, random
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from dataset import make_loader
 from model import VAESmiles
@@ -16,6 +19,48 @@ def set_seed(seed=42):
 def kld_loss(mu, logvar):
     # 0.5 * sum( exp(logvar) + mu^2 - 1 - logvar )
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+
+
+def split_dataframe(
+    df: pd.DataFrame,
+    *,
+    train_frac: float = 0.8,
+    val_frac: float = 0.1,
+    seed: int = 42,
+):
+    """Deterministically split dataframe into train/val/test subsets."""
+    if not 0 < train_frac < 1:
+        raise ValueError("train_frac must be between 0 and 1.")
+    if not 0 <= val_frac < 1:
+        raise ValueError("val_frac must be between 0 and 1.")
+    test_frac = 1.0 - train_frac - val_frac
+    if test_frac <= 0:
+        raise ValueError("train_frac + val_frac must be less than 1.")
+
+    n = len(df)
+    if n < 3:
+        raise ValueError("Need at least 3 samples to create train/val/test splits.")
+
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(n)
+    train_size = max(1, int(round(n * train_frac)))
+    val_size = max(1, int(round(n * val_frac)))
+    if train_size + val_size >= n:
+        val_size = max(1, min(val_size, n - train_size - 1))
+    test_size = n - train_size - val_size
+    if test_size <= 0:
+        raise ValueError("Split produced an empty test set; adjust fractions.")
+
+    train_idx = indices[:train_size]
+    val_idx = indices[train_size:train_size + val_size]
+    test_idx = indices[train_size + val_size:]
+
+    return (
+        df.iloc[train_idx].reset_index(drop=True),
+        df.iloc[val_idx].reset_index(drop=True),
+        df.iloc[test_idx].reset_index(drop=True),
+    )
+
 
 # 训练一个 epoch
 def train_one_epoch(model, loader, opt, kl_weight, pad_id, device, *, scaler=None, scheduler=None):
@@ -92,17 +137,36 @@ def main():
     polybert_name = "kuelumbus/polyBERT"
     tokenizer = PolyBertTokenizer(polybert_name)
 
+    # 1.5) 加载数据并划分训练/验证/测试
+    data_path = Path("data/molecules.csv")
+    df = pd.read_csv(data_path)
+    train_df, val_df, test_df = split_dataframe(df, train_frac=0.8, val_frac=0.1, seed=42)
+
     # 2) DataLoader
     train_loader = make_loader(
-        "data/molecules.csv",
+        train_df,
         tokenizer,
         batch_size=256,
         shuffle=True,
         col="smiles",
         max_len=256,
     )
-    # 若有独立验证集，可替换为 make_loader("data/val.csv", tokenizer, shuffle=False)
-    val_loader = train_loader
+    val_loader = make_loader(
+        val_df,
+        tokenizer,
+        batch_size=256,
+        shuffle=False,
+        col="smiles",
+        max_len=256,
+    )
+    test_loader = make_loader(
+        test_df,
+        tokenizer,
+        batch_size=256,
+        shuffle=False,
+        col="smiles",
+        max_len=256,
+    )
 
     # 3) 模型：使用 polyBERT 编码器 + GRU 解码器
     polybert_encoder = AutoModel.from_pretrained(polybert_name)
@@ -159,6 +223,10 @@ def main():
             if bad >= patience:
                 print("Early stop.")
                 break
+
+    # 5) 训练结束后在测试集上做一次评估（kl_weight=1.0 更常见）
+    test_loss_val = val_loss(model, test_loader, kl_weight=1.0, pad_id=tokenizer.pad_id, device=device)
+    print(f"Test loss {test_loss_val:.4f}")
 
 if __name__ == "__main__":
     main()
