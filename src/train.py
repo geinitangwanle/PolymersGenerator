@@ -61,6 +61,47 @@ def split_dataframe(
         df.iloc[test_idx].reset_index(drop=True),
     )
 
+# polybert微调
+def configure_polybert_finetuning(
+    polybert,
+    *,
+    train_last_n_layers: int = 0,
+    unfreeze_embedding_layernorm: bool = True,
+):
+    if polybert is None:
+        return []
+
+    for param in polybert.parameters(): # 默认冻结所有参数
+        param.requires_grad = False
+
+    if train_last_n_layers <= 0: # 如果设定解冻层数为0，则不微调任何层
+        polybert.eval()
+        return []
+
+    polybert.train()
+    encoder = getattr(polybert, "encoder", None)
+    if encoder is not None and hasattr(encoder, "layer"):
+        layers = encoder.layer
+        n_layers = len(layers)
+        n_to_train = min(max(1, train_last_n_layers), n_layers)
+        for layer in layers[-n_to_train:]:
+            for param in layer.parameters(): # 只解冻最后 n 层
+                param.requires_grad = True 
+
+    if hasattr(polybert, "pooler"):
+        for param in polybert.pooler.parameters():
+            param.requires_grad = True
+
+    if unfreeze_embedding_layernorm:
+        embeddings = getattr(polybert, "embeddings", None)
+        if embeddings is not None:
+            layer_norm = getattr(embeddings, "LayerNorm", None) or getattr(embeddings, "layer_norm", None)
+            if layer_norm is not None:
+                for param in layer_norm.parameters():
+                    param.requires_grad = True
+
+    return [p for p in polybert.parameters() if p.requires_grad]
+
 
 # 训练一个 epoch
 def train_one_epoch(model, loader, opt, kl_weight, pad_id, device, *, scaler=None, scheduler=None):
@@ -135,6 +176,8 @@ def main():
 
     # 1) 载入 polyBERT tokenizer
     polybert_name = "kuelumbus/polyBERT"
+    polybert_train_last_n = int(os.getenv("POLYBERT_TRAIN_LAST_N", 2)) # 解冻最后2层进行微调
+    polybert_lr = float(os.getenv("POLYBERT_LR", 1e-5))
     tokenizer = PolyBertTokenizer(polybert_name)
 
     # 1.5) 加载数据并划分训练/验证/测试
@@ -168,8 +211,17 @@ def main():
         max_len=256,
     )
 
-    # 3) 模型：使用 polyBERT 编码器 + GRU 解码器
+    # 3) 模型：使用 polyBERT 编码器
     polybert_encoder = AutoModel.from_pretrained(polybert_name)
+    trainable_polybert_params = configure_polybert_finetuning(
+        polybert_encoder,
+        train_last_n_layers=polybert_train_last_n,
+    )
+    if trainable_polybert_params:
+        trained_params = sum(p.numel() for p in trainable_polybert_params)
+        print(f"Fine-tuning last {polybert_train_last_n} polyBERT layers (~{trained_params:,} params).")
+    else:
+        print("polyBERT kept frozen.")
     bos_token_id = tokenizer.bos_id
     eos_token_id = tokenizer.eos_id
     if bos_token_id is None or eos_token_id is None:
@@ -187,10 +239,24 @@ def main():
         drop=0.1,
         use_polybert=True,
         polybert=polybert_encoder,
-        freeze_polybert=True,
+        freeze_polybert=False,
         polybert_pooling="cls",
     ).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+    base_lr = 3e-4
+    weight_decay = 0.01
+    polybert_params = []
+    other_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.startswith("polybert."):
+            polybert_params.append(param)
+        else:
+            other_params.append(param)
+    param_groups = [{"params": other_params, "lr": base_lr, "weight_decay": weight_decay}]
+    if polybert_params:
+        param_groups.append({"params": polybert_params, "lr": polybert_lr, "weight_decay": weight_decay})
+    opt = torch.optim.AdamW(param_groups)
 
     # 4) KL 退火
     epochs = 30

@@ -1,3 +1,4 @@
+import os
 import sys
 import torch
 import pandas as pd
@@ -15,7 +16,31 @@ sys.path.append(str(repo / "src"))
 from src.tokenizer import PolyBertTokenizer
 from src.dataset import make_loader
 from src.modelv2 import VAESmiles
-from src.train import train_one_epoch, val_loss, set_seed, split_dataframe
+from src.train import (
+    train_one_epoch,
+    val_loss,
+    set_seed,
+    split_dataframe,
+    configure_polybert_finetuning,
+)
+
+
+def build_param_groups(model, base_lr, polybert_lr, weight_decay):
+    """Split optimizer groups so polyBERT can use a smaller LR (works for both DDP and single GPU)."""
+    polybert_params, other_params = [], []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        clean_name = name.split("module.", 1)[-1]
+        if clean_name.startswith("polybert."):
+            polybert_params.append(param)
+        else:
+            other_params.append(param)
+
+    groups = [{"params": other_params, "lr": base_lr, "weight_decay": weight_decay}]
+    if polybert_params and polybert_lr is not None:
+        groups.append({"params": polybert_params, "lr": polybert_lr, "weight_decay": weight_decay})
+    return groups
 
 # ==============================
 # 核心函数：支持单机多卡DDP训练
@@ -35,6 +60,8 @@ def main(rank, world_size):
     if not csv_path.exists():
         csv_path = Path("data/PSMILES_Tg_only.csv")
     tokenizer = PolyBertTokenizer("./polybert")
+    polybert_train_last_n = int(os.getenv("POLYBERT_TRAIN_LAST_N", 2))
+    polybert_lr = float(os.getenv("POLYBERT_LR", 1e-5))
 
     # === 数据划分（确保各 rank 使用相同拆分） ===
     df = pd.read_csv(csv_path)
@@ -74,6 +101,16 @@ def main(rank, world_size):
 
     # === 模型加载 ===
     polybert = AutoModel.from_pretrained("./polybert").to(device)
+    trainable_polybert_params = configure_polybert_finetuning(
+        polybert,
+        train_last_n_layers=polybert_train_last_n,
+    )
+    if rank == 0:
+        if trainable_polybert_params:
+            trained_params = sum(p.numel() for p in trainable_polybert_params)
+            print(f"[Rank {rank}] Fine-tuning last {polybert_train_last_n} polyBERT layers (~{trained_params:,} params).")
+        else:
+            print("[Rank 0] polyBERT kept frozen.")
     model = VAESmiles(
         vocab_size=tokenizer.vocab_size,
         emb_dim=256,
@@ -87,7 +124,7 @@ def main(rank, world_size):
         drop=0.1,
         use_polybert=True,
         polybert=polybert,
-        freeze_polybert=True,
+        freeze_polybert=False,
         polybert_pooling="cls",
     ).to(device)
 
@@ -96,7 +133,9 @@ def main(rank, world_size):
         model = DDP(model, device_ids=[rank], output_device=rank)
 
     # === 优化器与调度器 ===
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=0.01)
+    base_lr = 3e-4
+    weight_decay = 0.01
+    optimizer = torch.optim.AdamW(build_param_groups(model, base_lr, polybert_lr, weight_decay))
     total_steps = len(train_loader) * 10  # 10 epochs
     scheduler = get_cosine_schedule_with_warmup(
         optimizer, num_warmup_steps=total_steps//10, num_training_steps=total_steps
