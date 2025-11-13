@@ -48,7 +48,10 @@ def parse_args():
     return parser.parse_args()
 """python train_tg.py --csv data/PSMILES_Tg_only.csv --polybert-dir ./polybert --epochs 30 --polybert-train-last-n 2 --lambda-tg 0.5 --output checkpoints/modelv3_tg.pt"""
 
-def prepare_device(preferred: str | None):
+from typing import Optional
+
+
+def prepare_device(preferred: Optional[str]):
     if preferred is not None:
         return torch.device(preferred)
     if torch.cuda.is_available():

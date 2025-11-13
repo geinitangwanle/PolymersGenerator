@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 
 
 ArrayLike = Union[Sequence[float], torch.Tensor, np.ndarray]
@@ -80,6 +81,11 @@ class SmilesTgDataset(Dataset):
     def _encode(self, smiles: str): # 编码单条 SMILES
         if self.preprocess:
             smiles = self.preprocess(smiles)
+
+        if hasattr(self.tokenizer, "bos_id"):
+            ids = self.tokenizer.encode(smiles)
+            return ids[: self.max_len]
+
         ids = self.tokenizer.encode(
             smiles,
             add_special_tokens=True,
@@ -122,6 +128,14 @@ def collate_tg(batch, pad_id: int): # 将若干样本整理成批
         "tg": tg_tensor, # 标准化后的 Tg 值
     }
 
+
+class TgCollator: # 用于 DataLoader 的 collate_fn 包装器
+    def __init__(self, pad_id: int):
+        self.pad_id = pad_id
+
+    def __call__(self, batch):
+        return collate_tg(batch, self.pad_id)
+
 # 把前面的 Dataset 和 DataLoader 串起来创建好
 def make_loader_with_tg(
     data_source: Union[str, Path, pd.DataFrame],
@@ -136,6 +150,7 @@ def make_loader_with_tg(
     preprocess: Optional[Callable[[str], str]] = None,
     tg_stats: Optional[TgStats] = None,
     drop_last: bool = False,
+    distributed: bool = False,
 ):
     dataset = SmilesTgDataset(
         data_source,
@@ -146,12 +161,18 @@ def make_loader_with_tg(
         preprocess=preprocess,
         tg_stats=tg_stats,
     )
+    sampler = None
+    if distributed:
+        sampler = DistributedSampler(dataset, shuffle=shuffle)
+        shuffle = False
+
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
+        sampler=sampler,
         num_workers=num_workers,
         drop_last=drop_last,
-        collate_fn=lambda batch: collate_tg(batch, dataset.pad_id),
+        collate_fn=TgCollator(dataset.pad_id),
     )
     return loader, dataset.tg_stats

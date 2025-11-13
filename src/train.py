@@ -5,11 +5,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from dataset import make_loader
-from model import VAESmiles
-from tokenizer import PolyBertTokenizer
-from transformers import AutoModel
 from contextlib import nullcontext
+from transformers import AutoModel
+
+try:
+    from dataset import make_loader
+    from model import VAESmiles
+    from tokenizer import PolyBertTokenizer
+except ImportError:  # When imported as package (e.g., src.train)
+    from .dataset import make_loader
+    from .model import VAESmiles
+    from .tokenizer import PolyBertTokenizer
 #====================================================================
 # 设置随机种子，以保证实验可复现
 def set_seed(seed=42):
