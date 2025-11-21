@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModel
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent # 自动定位到项目根目录
 sys.path.append(str(ROOT / "src"))  # 允许从 src 目录直接导入模块
 
 from dataset import make_loader
