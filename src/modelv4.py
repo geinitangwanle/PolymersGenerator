@@ -35,6 +35,9 @@ class ConditionalVAESmiles(nn.Module):
         freeze_polybert: bool = False, # 是否冻结 polyBERT 参数
         polybert_pooling: str = "cls", # 'cls' or 'mean' 池化方式
         max_len: int = 256, # 最大序列长度（位置嵌入用）
+        num_decoder_layers: int = 4, # 解码器层数（原先固定为 4）
+        decoder_nhead: int = 8, # 解码器多头注意力头数
+        decoder_ff_mult: int = 4, # 解码器前馈层维度放大倍数
         use_tg_regression: bool = True, # 是否使用 Tg 回归头
         tg_hidden_dim: int = 128, # Tg 回归头隐藏层维度
     ):
@@ -48,6 +51,9 @@ class ConditionalVAESmiles(nn.Module):
         self.drop = nn.Dropout(drop)
         self.emb = nn.Embedding(vocab_size, emb_dim, padding_idx=pad_id)
         self.max_len = max_len
+        self.decoder_hid_dim = decoder_hid_dim
+        self.decoder_nhead = decoder_nhead
+        self.decoder_ff_mult = decoder_ff_mult
 
         self.use_polybert = use_polybert
         self.polybert_pooling = polybert_pooling
@@ -87,13 +93,13 @@ class ConditionalVAESmiles(nn.Module):
         self.pos_emb = nn.Embedding(self.max_len, emb_dim) # 位置嵌入层
         self.latent_proj = nn.Linear(z_dim + cond_latent_dim, emb_dim) #将拼接后的潜变量映射到解码器输入维度
 
-        self.num_decoder_layers = 4  # 保持原有 4 层解码器，用 ModuleList 便于逐层插入 FiLM
+        self.num_decoder_layers = num_decoder_layers  # 使用可配置层数，默认 4 层
         self.decoder_layers = nn.ModuleList(
             [
                 TransformerDecoderLayer(
                     d_model=emb_dim,
-                    nhead=8,
-                    dim_feedforward=4 * emb_dim,
+                    nhead=decoder_nhead,
+                    dim_feedforward=decoder_ff_mult * emb_dim,
                     dropout=drop,
                     batch_first=True,
                 )
