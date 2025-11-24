@@ -1,5 +1,5 @@
 #============================导入模块================================
-import os, torch, random
+import os, torch, random, sys
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +7,10 @@ import pandas as pd
 from tqdm import tqdm
 from contextlib import nullcontext
 from transformers import AutoModel
+
+SCRIPT_ROOT = Path(__file__).resolve().parent
+PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
+sys.path.append(str(PROJ_ROOT / "src"))
 
 try:
     from dataset import make_loader

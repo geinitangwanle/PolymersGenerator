@@ -9,13 +9,14 @@ import torch
 from rdkit import Chem
 from transformers import AutoModel
 
-repo = Path(__file__).resolve().parent
-sys.path.append(str(repo / "src"))
+SCRIPT_ROOT = Path(__file__).resolve().parent
+PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
+sys.path.append(str(PROJ_ROOT / "src"))
 
-from src.tokenizer import PolyBertTokenizer  # noqa: E402
-from src.modelv2 import VAESmiles as VAESmilesV2  # noqa: E402
-from src.model import VAESmiles as VAESmilesV1  # noqa: E402
-from src.train import set_seed  # noqa: E402
+from tokenizer import PolyBertTokenizer  # noqa: E402
+from modelv2 import VAESmiles as VAESmilesV2  # noqa: E402
+from model import VAESmiles as VAESmilesV1  # noqa: E402
+from train import set_seed  # noqa: E402
 
 
 def parse_args():

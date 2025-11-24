@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import List
 
@@ -8,9 +9,13 @@ import torch
 from rdkit import Chem
 from transformers import AutoModel
 
-from src.dataset_tg import TgStats
-from src.modelv3 import ConditionalVAESmiles
-from src.tokenizer import PolyBertTokenizer
+SCRIPT_ROOT = Path(__file__).resolve().parent
+PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
+sys.path.append(str(PROJ_ROOT / "src"))
+
+from dataset_tg import TgStats
+from modelv3 import ConditionalVAESmiles
+from tokenizer import PolyBertTokenizer
 
 
 def parse_args():

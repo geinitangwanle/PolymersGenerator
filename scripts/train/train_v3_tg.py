@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -7,10 +8,14 @@ import torch
 from torch.optim import AdamW
 from transformers import AutoModel
 
-from src.dataset_tg import make_loader_with_tg
-from src.modelv3 import ConditionalVAESmiles
-from src.tokenizer import PolyBertTokenizer
-from src.train import (
+SCRIPT_ROOT = Path(__file__).resolve().parent
+PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
+sys.path.append(str(PROJ_ROOT / "src"))
+
+from dataset_tg import make_loader_with_tg
+from modelv3 import ConditionalVAESmiles
+from tokenizer import PolyBertTokenizer
+from train import (
     configure_polybert_finetuning,
     kld_loss,
     set_seed,

@@ -13,8 +13,9 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModel
 
-ROOT = Path(__file__).resolve().parent
-sys.path.append(str(ROOT / "src"))
+SCRIPT_ROOT = Path(__file__).resolve().parent
+PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
+sys.path.append(str(PROJ_ROOT / "src"))
 
 from tokenizer import PolyBertTokenizer  # noqa: E402
 from dataset_tg import make_loader_with_tg, TgStats  # noqa: E402

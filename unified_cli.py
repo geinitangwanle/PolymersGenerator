@@ -23,10 +23,15 @@ ROOT = Path(__file__).resolve().parent
 
 
 def run_script(script: Path, extra_args: List[str], *, prepend: Optional[List[str]] = None):
+    # 兼容从 unified_cli 调用时多余的 "--"
+    clean_extra = extra_args[1:] if extra_args and extra_args[0] == "--" else extra_args
+    # 若首个参数缺少 flag（常见于误写掉 --checkpoint），自动补上以避免位置错位
+    if clean_extra and not clean_extra[0].startswith("-") and script.name.startswith("sample_v4_uncond"):
+        clean_extra = ["--checkpoint"] + clean_extra
     cmd = [sys.executable, str(script)]
     if prepend:
         cmd.extend(prepend)
-    cmd.extend(extra_args)
+    cmd.extend(clean_extra)
     print(f"[unified-cli] running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
@@ -99,7 +104,13 @@ def build_parser():
 
 def main():
     parser = build_parser()
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    # 允许两种方式传递子脚本参数：1) 使用“--”后跟参数（存到 args.extra）
+    # 2) 不加分隔符（落到 unknown）。优先使用已存在的 extra，否则用 unknown。
+    if getattr(args, "extra", None):
+        args.extra = args.extra
+    else:
+        args.extra = unknown
     args.func(args)
 
 

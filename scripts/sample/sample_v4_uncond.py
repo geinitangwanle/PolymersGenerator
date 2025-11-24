@@ -14,8 +14,9 @@ import torch
 from rdkit import Chem
 from transformers import AutoModel
 
-ROOT = Path(__file__).resolve().parent
-sys.path.append(str(ROOT / "src"))
+SCRIPT_ROOT = Path(__file__).resolve().parent
+PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
+sys.path.append(str(PROJ_ROOT / "src"))
 
 from tokenizer import PolyBertTokenizer  # noqa: E402
 from train import set_seed  # noqa: E402
@@ -36,9 +37,9 @@ def resolve_model_class(model_size: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Unconditional sampling from a pretrained ConditionalVAESmiles.")
-    parser.add_argument("--checkpoint", type=Path, default=ROOT / "checkpoints/pretrain_modelv4.pt",
+    parser.add_argument("--checkpoint", type=Path, default=PROJ_ROOT / "checkpoints/pretrain_modelv4.pt",
                         help="Path to the pretrained checkpoint from train_pretrain.py")
-    parser.add_argument("--polybert-dir", type=Path, default=ROOT / "polybert",
+    parser.add_argument("--polybert-dir", type=Path, default=PROJ_ROOT / "polybert",
                         help="Directory containing the polyBERT weights/tokenizer (match pretraining).")
     parser.add_argument("--model-size", type=str, default=None, choices=["base", "medium", "premium"],
                         help="Optional override for model capacity; if None, infer from checkpoint.")
@@ -54,7 +55,7 @@ def parse_args():
     parser.add_argument("--top-k", type=int, default=None, help="Top-k sampling (applied before top-p).")
     parser.add_argument("--top-p", type=float, default=None, help="Top-p (nucleus) sampling.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs_pretrain",
+    parser.add_argument("--output-dir", type=Path, default=PROJ_ROOT / "outputs_pretrain",
                         help="Directory to store outputs.")
     parser.add_argument("--samples-file", type=str, default="samples_pretrain.csv",
                         help="Filename for sampled SMILES CSV.")
