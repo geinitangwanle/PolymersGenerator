@@ -14,6 +14,8 @@ PROJ_ROOT = SCRIPT_ROOT.parent.parent  # .../PolymersGenerator
 sys.path.append(str(PROJ_ROOT / "src"))
 
 from modelv4 import ConditionalVAESmiles  # noqa: E402
+from modelv4_medium import ConditionalVAESmiles as ConditionalVAESmilesMedium  # noqa: E402
+from modelv4_premium import ConditionalVAESmiles as ConditionalVAESmilesPremium  # noqa: E402
 from dataset_tg import TgStats, compute_tg_stats  # noqa: E402
 from syntax_mask import SyntaxMasker  # noqa: E402
 from tokenizer import PolyBertTokenizer  # noqa: E402
@@ -32,6 +34,8 @@ def parse_args():
                         help="Column name in the CSV that holds SMILES strings.")
     parser.add_argument("--col-tg", type=str, default="Tg",
                         help="Column name for Tg values (used for normalization if stats not in checkpoint).")
+    parser.add_argument("--model-size", type=str, default=None, choices=["base", "medium", "premium"],
+                        help="Optional override for model capacity; if None, infer from checkpoint.")
     parser.add_argument("--target-tg", type=float, nargs="+", required=True,
                         help="Target Tg values (Kelvin) for conditional sampling.")
     parser.add_argument("--num-per-target", type=int, default=128,
@@ -73,6 +77,15 @@ def load_model(args, device) -> Tuple[ConditionalVAESmiles, PolyBertTokenizer, O
     tokenizer = PolyBertTokenizer(polybert_name)
     polybert = AutoModel.from_pretrained(polybert_name).to(device)
 
+    ckpt_model_size = ckpt.get("model_size")
+    model_size = args.model_size or ckpt_model_size or "base"
+    if model_size == "medium":
+        ModelCls = ConditionalVAESmilesMedium
+    elif model_size == "premium":
+        ModelCls = ConditionalVAESmilesPremium
+    else:
+        ModelCls = ConditionalVAESmiles
+
     if "model_kwargs" in ckpt:
         model_kwargs = ckpt["model_kwargs"]
         model_kwargs.update({
@@ -83,9 +96,9 @@ def load_model(args, device) -> Tuple[ConditionalVAESmiles, PolyBertTokenizer, O
             "bos_id": tokenizer.bos_id,
             "eos_id": tokenizer.eos_id,
         })
-        model = ConditionalVAESmiles(**model_kwargs).to(device)
+        model = ModelCls(**model_kwargs).to(device)
     else:
-        model = ConditionalVAESmiles(
+        model = ModelCls(
             vocab_size=tokenizer.vocab_size,
             emb_dim=256,
             encoder_hid_dim=polybert.config.hidden_size,

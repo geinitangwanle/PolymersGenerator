@@ -25,9 +25,13 @@ ROOT = Path(__file__).resolve().parent
 def run_script(script: Path, extra_args: List[str], *, prepend: Optional[List[str]] = None):
     # 兼容从 unified_cli 调用时多余的 "--"
     clean_extra = extra_args[1:] if extra_args and extra_args[0] == "--" else extra_args
-    # 若首个参数缺少 flag（常见于误写掉 --checkpoint），自动补上以避免位置错位
+    # 若首个参数缺少 flag，针对常见误写自动补齐
     if clean_extra and not clean_extra[0].startswith("-") and script.name.startswith("sample_v4_uncond"):
         clean_extra = ["--checkpoint"] + clean_extra
+    if script.name.startswith("sample_v4_mask") and ("--checkpoint" not in clean_extra):
+        clean_extra = ["--checkpoint"] + clean_extra
+    if script.name.startswith("train_v4_") and ("--csv" not in clean_extra):
+        clean_extra = ["--csv"] + clean_extra
     cmd = [sys.executable, str(script)]
     if prepend:
         cmd.extend(prepend)
