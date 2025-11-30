@@ -250,7 +250,13 @@ def compute_metrics(samples: List[str], train_set: set) -> Dict[str, float]:
     }
 
 
-def save_samples(samples: List[str], train_set: set, output_path: Path):
+def save_samples(
+    samples: List[str],
+    train_set: set,
+    output_path: Path,
+    sample_targets: Optional[List[float]] = None,
+    temperature: Optional[float] = None,
+):
     seen = set()
     records = []
     for idx, s in enumerate(samples):
@@ -258,15 +264,18 @@ def save_samples(samples: List[str], train_set: set, output_path: Path):
         is_valid = mol is not None
         is_unique = s not in seen
         in_training = s in train_set
-        records.append(
-            {
-                "sample_id": idx,
-                "smiles": s,
-                "is_valid": is_valid,
-                "is_unique": is_unique,
-                "in_training_set": in_training,
-            }
-        )
+        record = {
+            "sample_id": idx,
+            "smiles": s,
+            "is_valid": is_valid,
+            "is_unique": is_unique,
+            "in_training_set": in_training,
+        }
+        if sample_targets is not None:
+            record["target_tg"] = sample_targets[idx] if idx < len(sample_targets) else None
+        if temperature is not None:
+            record["sampling_temperature"] = temperature
+        records.append(record)
         seen.add(s)
 
     df = pd.DataFrame(records)
@@ -316,8 +325,18 @@ def main():
     samples_path = output_dir / args.samples_file
     metrics_path = output_dir / args.metrics_file
 
-    save_samples(samples, train_set, samples_path)
+    sample_targets = [t for t in args.target_tg for _ in range(args.num_per_target)]
+    sample_targets = sample_targets[: len(samples)]
+
+    save_samples(
+        samples,
+        train_set,
+        samples_path,
+        sample_targets=sample_targets,
+        temperature=args.temperature,
+    )
     metrics = compute_metrics(samples, train_set)
+    metrics["sampling_temperature"] = args.temperature
     save_metrics(metrics, metrics_path)
 
     print(f"Saved {len(samples)} samples to {samples_path}")
